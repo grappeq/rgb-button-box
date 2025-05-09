@@ -72,27 +72,41 @@ async def rainbow(duration_ms=3000, steps=60, loops=1):
     return PALETTE
 
 # ---------------------------------------------------------------
-#  Startup: all LEDs off → light 0 → light 1 → light 2 → rainbow
+#  Startup: all LEDs off → FADE LED-0 → FADE LED-1 → FADE LED-2
+#           → one rainbow cycle → normal operation
 # ---------------------------------------------------------------
 async def startup_sequence(
-        gap_ms=350,                         # pause between LEDs
-        pre_colour=(40000, 40000, 40000)):  # soft “white” while waiting
+        pre_colour=(40000, 40000, 40000),  # target “white” for fade
+        fade_ms=400,                      # how long the fade for ONE LED lasts
+        steps=32,                         # more steps = smoother fade
+        gap_ms=120):                      # pause after each LED reaches full
     """
-    1.  Turn every LED off.
-    2.  Light them one-by-one (gap_ms between each).
-    3.  Hand control to the normal rainbow() animation.
+    Power-on flourish with per-LED fades (non-blocking).
+
+    • All LEDs off
+    • Each LED ramps from 0 → pre_colour in `fade_ms`
+    • Little gap, then next LED
+    • Finishes with one rainbow() to build the new palette
     """
-    # 1) lights off
+
+    # 0) lights off
     for idx in range(3):
         set_rgb(idx, 0, 0, 0)
     await asyncio.sleep_ms(gap_ms)
 
-    # 2) sequential on
+    # 1) sequential fade-in
+    step_delay = max(1, fade_ms // steps)
     for idx in range(3):
-        set_rgb(idx, *pre_colour)
+        for n in range(steps + 1):                # 0 … steps
+            f = n / steps                         # 0.0 → 1.0
+            r = int(pre_colour[0] * f)
+            g = int(pre_colour[1] * f)
+            b = int(pre_colour[2] * f)
+            set_rgb(idx, r, g, b)
+            await asyncio.sleep_ms(step_delay)
         await asyncio.sleep_ms(gap_ms)
 
-    # 3) run the normal rainbow once (you can make it faster if you wish)
+    # 2) run a rainbow once (adjust speed to taste)
     await rainbow(duration_ms=400, steps=24, loops=3)
 
 
