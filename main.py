@@ -36,30 +36,65 @@ def all_equal(lst):
     return lst[1:] == lst[:-1]
 
 # ── async rainbow sweep (finite-length) ────────────────────────────────
-async def rainbow(duration_ms=3_000, steps=60):
+async def rainbow(duration_ms=3000, steps=60, loops=1):
     """
-    Runs one rainbow cycle, sets PALETTE to the final LED colours +
-    “off”, and returns that list.
+    Run `loops` complete rainbow cycles.
+
+    • duration_ms : time for ONE cycle (not total)  
+    • steps       : frames per cycle (≥12 looks smooth on RP2040)  
+    • loops       : how many cycles to do before returning
+
+    On exit PALETTE is set to the colours from the LAST cycle.
     """
     global PALETTE
-    delay      = duration_ms // steps
-    start_phi  = random.random() * 2*math.pi
-    last_rgb   = [(0,0,0)] * 3
+    start_phi = random.random() * 2*math.pi
 
-    for i in range(steps + 1):
-        theta = i/steps * 2*math.pi
-        for idx in range(3):
-            phi = start_phi + idx * 2*math.pi/3 + theta
-            r = int((math.sin(phi)               * .5 + .5) * 65535)
-            g = int((math.sin(phi + 2*math.pi/3) * .5 + .5) * 65535)
-            b = int((math.sin(phi + 4*math.pi/3) * .5 + .5) * 65535)
-            set_rgb(idx, r, g, b)
-            if i == steps:                       # capture final colour
-                last_rgb[idx] = (r, g, b)
-        await asyncio.sleep_ms(delay)
+    for loop in range(loops):
+        last_rgb   = [(0,0,0)]*3
+        for i in range(steps + 1):                 # +1 gives perfect wrap
+            theta = i / steps * 2*math.pi          # 0 → 2π
+            for idx in range(3):
+                phi = start_phi + idx*2*math.pi/3 + theta
+                r = int((math.sin(phi)               * .5 + .5) * 65535)
+                g = int((math.sin(phi + 2*math.pi/3) * .5 + .5) * 65535)
+                b = int((math.sin(phi + 4*math.pi/3) * .5 + .5) * 65535)
+                set_rgb(idx, r, g, b)
+                if i == steps:
+                    last_rgb[idx] = (r, g, b)
+            # -- make it as quick as the MCU allows, but never sleep <1 ms
+            delay = max(1, duration_ms // steps)
+            await asyncio.sleep_ms(delay)
+
+        # rainbows are additive, so vary the start angle each loop
+        start_phi += random.random() * 2*math.pi
 
     PALETTE = last_rgb + [(0,0,0)]
     return PALETTE
+
+# ---------------------------------------------------------------
+#  Startup: all LEDs off → light 0 → light 1 → light 2 → rainbow
+# ---------------------------------------------------------------
+async def startup_sequence(
+        gap_ms=350,                         # pause between LEDs
+        pre_colour=(40000, 40000, 40000)):  # soft “white” while waiting
+    """
+    1.  Turn every LED off.
+    2.  Light them one-by-one (gap_ms between each).
+    3.  Hand control to the normal rainbow() animation.
+    """
+    # 1) lights off
+    for idx in range(3):
+        set_rgb(idx, 0, 0, 0)
+    await asyncio.sleep_ms(gap_ms)
+
+    # 2) sequential on
+    for idx in range(3):
+        set_rgb(idx, *pre_colour)
+        await asyncio.sleep_ms(gap_ms)
+
+    # 3) run the normal rainbow once (you can make it faster if you wish)
+    await rainbow(duration_ms=400, steps=24, loops=3)
+
 
 # ── async flash sequence ───────────────────────────────────────────────
 async def flash(times=3, on_ms=120, off_ms=120):
@@ -100,8 +135,9 @@ async def sync_manager():
         await sync_event.wait()       # waits until set by watcher
         sync_event.clear()
 
-        await flash()                 # 1) flash a few times
-        await rainbow()               # 2) make a brand-new palette
+        await flash()                 # flash a few times
+        # flash ➔ run 3 ultra-fast rainbows (0.4 s each)
+        await rainbow(duration_ms=400, steps=24, loops=3)
 
         # 3) re-seed button indices so LEDs differ again
         states[:] = [0, 1, 2]
@@ -110,7 +146,7 @@ async def sync_manager():
 
 # ── main entry point ───────────────────────────────────────────────────
 async def main():
-    await rainbow()                   # initial palette
+    await startup_sequence()                  # initial palette
     for idx in range(3):
         asyncio.create_task(watch_button(idx))
     asyncio.create_task(sync_manager())
