@@ -30,10 +30,9 @@
 ![Circuit](/designs/circuit/Button%20box_schem.png)
 
 ### Code
-```bash
-# 1. Flash MicroPython on your RP2040 board
-# 2. Drop `main.py` onto the device
-# 3. Power up → admire the startup light show
+1. Flash MicroPython on your RP2040 board
+2. Drop `main.py` onto the device
+3. Power up → admire the startup light show
 
 ## Custom Tweaks
 Open `main.py` and twiddle:
