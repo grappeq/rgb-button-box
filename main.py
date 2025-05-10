@@ -10,6 +10,8 @@ RGB_BUTTON_PINS = [
     {"red": 10, "green": 11, "blue": 12, "button": 13},
 ]
 
+GAMMA = 2.2          # ≈2.0-2.4 suits most LEDs; tweak to taste
+
 # ── hardware init ──────────────────────────────────────────────────────
 rgb_pwms = []
 for spec in RGB_BUTTON_PINS:
@@ -27,10 +29,17 @@ states      = [0, 1, 2]     # current palette index of each button
 sync_event  = asyncio.Event()   # set when all three indices equal
 
 # ── helpers ────────────────────────────────────────────────────────────
+def gamma_encode(u16):
+    """Map linear duty (0‒65535) to eye-linear using display-gamma."""
+    if u16 == 0 or u16 == 65535:          # keep the extremes exact
+        return u16
+    return int((u16 / 65535) ** GAMMA * 65535 + 0.5)
+
 def set_rgb(idx, r, g, b):
-    rgb_pwms[idx]["red"  ].duty_u16(r)
-    rgb_pwms[idx]["green"].duty_u16(g)
-    rgb_pwms[idx]["blue" ].duty_u16(b)
+    """Apply γ-correction then write PWM to one LED trio."""
+    rgb_pwms[idx]["red"  ].duty_u16(gamma_encode(r))
+    rgb_pwms[idx]["green"].duty_u16(gamma_encode(g))
+    rgb_pwms[idx]["blue" ].duty_u16(gamma_encode(b))
 
 def all_equal(lst):
     return lst[1:] == lst[:-1]
@@ -40,8 +49,8 @@ async def rainbow(duration_ms=3000, steps=60, loops=1):
     """
     Run `loops` complete rainbow cycles.
 
-    • duration_ms : time for ONE cycle (not total)  
-    • steps       : frames per cycle (≥12 looks smooth on RP2040)  
+    • duration_ms : time for ONE cycle (not total)
+    • steps       : frames per cycle (≥12 looks smooth on RP2040)
     • loops       : how many cycles to do before returning
 
     On exit PALETTE is set to the colours from the LAST cycle.
@@ -72,8 +81,8 @@ async def rainbow(duration_ms=3000, steps=60, loops=1):
     return PALETTE
 
 # ---------------------------------------------------------------
-#  Startup: all LEDs off → FADE LED-0 → FADE LED-1 → FADE LED-2
-#           → one rainbow cycle → normal operation
+#  Startup: all LEDs off → FADE LED-0 → LED-1 → LED-2
+#           → three quick rainbow cycles → normal operation
 # ---------------------------------------------------------------
 async def startup_sequence(
         pre_colour=(40000, 40000, 40000),  # target “white” for fade
@@ -86,7 +95,7 @@ async def startup_sequence(
     • All LEDs off
     • Each LED ramps from 0 → pre_colour in `fade_ms`
     • Little gap, then next LED
-    • Finishes with one rainbow() to build the new palette
+    • Finishes with rainbow() to build the palette
     """
 
     # 0) lights off
@@ -108,7 +117,6 @@ async def startup_sequence(
 
     # 2) run a rainbow once (adjust speed to taste)
     await rainbow(duration_ms=400, steps=24, loops=3)
-
 
 # ── async flash sequence ───────────────────────────────────────────────
 async def flash(times=3, on_ms=120, off_ms=120):
