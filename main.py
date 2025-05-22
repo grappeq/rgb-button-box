@@ -23,6 +23,11 @@ for spec in RGB_BUTTON_PINS:
 
 buttons = [Pin(spec["button"], Pin.IN, Pin.PULL_UP) for spec in RGB_BUTTON_PINS]
 
+# ── piezo buzzer ───────────────────────────────────────────────
+# Active-high on GP15; keep it silent until we need it
+buzzer = PWM(Pin(15, Pin.OUT))
+buzzer.duty_u16(0)
+
 # ── globals used by the coroutines ─────────────────────────────────────
 PALETTE     = []            # [(r,g,b), … , (0,0,0)]  length ≥ 4
 states      = [0, 1, 2]     # current palette index of each button
@@ -43,6 +48,30 @@ def set_rgb(idx, r, g, b):
 
 def all_equal(lst):
     return lst[1:] == lst[:-1]
+
+# ── sound helper ────────────────────────────────────────────────
+async def play_win_sound():
+    """Non-blocking 4-note arpeggio on the piezo buzzer."""
+    tune = [                        # (frequency Hz, duration ms)
+        (440, 120),   # A4
+        (523, 120),   # C♯5
+        (659, 120),   # E5
+        (784, 160),   # G5
+        (1047, 320),  # C6
+        (1319, 480),  # E6  (held)
+        ]
+    for freq, dur in tune:
+        buzzer.freq(freq)
+        buzzer.duty_u16(512) # 1/128 loudness
+        await asyncio.sleep_ms(dur)
+    buzzer.duty_u16(0)              # silence
+
+async def play_click():
+    """Very short tick so the player feels the press immediately."""
+    buzzer.freq(400)            # mid-pitch click
+    buzzer.duty_u16(1024)       # 50 % duty, loud enough
+    await asyncio.sleep_ms(20)   # 20 ms burst
+    buzzer.duty_u16(0)           # silence
 
 # ── async rainbow sweep (finite-length) ────────────────────────────────
 async def rainbow(duration_ms=3000, steps=60, loops=1):
@@ -139,6 +168,8 @@ async def watch_button(idx):
             states[idx] = (states[idx] + 1) % len(PALETTE)
             set_rgb(idx, *PALETTE[states[idx]])
 
+            asyncio.create_task(play_click())
+
             # async debounce
             while not pin.value():
                 await asyncio.sleep_ms(10)
@@ -157,6 +188,7 @@ async def sync_manager():
         await sync_event.wait()       # waits until set by watcher
         sync_event.clear()
 
+        asyncio.create_task(play_win_sound())
         await flash()                 # flash a few times
         # flash ➔ run 3 ultra-fast rainbows (0.4 s each)
         await rainbow(duration_ms=400, steps=24, loops=3)
